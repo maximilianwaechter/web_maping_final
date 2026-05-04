@@ -1,0 +1,3074 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Philadelphia Food Accessibility</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.20.0/mapbox-gl.css" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
+
+  <style>
+    :root {
+      /* Modern civic dashboard palette */
+      --bg: #eef2f6;
+      --panel: rgba(255, 255, 255, 0.96);
+      --panel-strong: #ffffff;
+      --surface: #f5f7fa;
+      --surface-2: #eef2f6;
+      --text: #0f1822;
+      --muted: #4d5a6b;
+      --faint: #8595a8;
+      --border: #dde4ec;
+      --border-strong: #c5d0dd;
+      --accent: #0a6e84;
+      --accent-dark: #074f60;
+      --accent-soft: rgba(10, 110, 132, 0.10);
+      --grocery: #1f6fb2;
+      --market: #1f8f5a;
+      --grocery-dark: #144d80;
+      --market-dark: #145c3a;
+      --noaccess: #6f5b8e;
+      --noaccess-line: #4f3f6b;
+      --noaccess-soft: rgba(111, 91, 142, 0.16);
+      --danger: #b65a3f;
+      --danger-soft: rgba(182, 90, 63, 0.14);
+      --time5: #fbd197;
+      --rec: #d4a017;
+      --rec-dark: #8a6810;
+      --rec-soft: rgba(212, 160, 23, 0.12);
+      --shadow-lg: 0 18px 44px rgba(15, 24, 34, 0.16), 0 4px 10px rgba(15, 24, 34, 0.06);
+      --shadow-md: 0 8px 22px rgba(15, 24, 34, 0.08);
+      --shadow-sm: 0 2px 6px rgba(15, 24, 34, 0.06);
+      --radius: 14px;
+      --radius-sm: 10px;
+      --radius-xs: 8px;
+      --sidebar-w: 380px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background: var(--bg);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      font-feature-settings: 'cv11', 'ss01', 'ss03';
+    }
+
+    code, .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+
+    #map {
+      position: absolute;
+      inset: 0;
+    }
+
+    .app-shell {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    .sidebar {
+      pointer-events: auto;
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      width: var(--sidebar-w);
+      max-width: calc(100% - 32px);
+      max-height: calc(100vh - 32px);
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: var(--shadow-lg);
+      backdrop-filter: blur(12px) saturate(140%);
+      -webkit-backdrop-filter: blur(12px) saturate(140%);
+      padding: 18px 18px 16px 18px;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border-strong) transparent;
+    }
+
+    .sidebar::-webkit-scrollbar { width: 8px; }
+    .sidebar::-webkit-scrollbar-thumb {
+      background: var(--border-strong);
+      border-radius: 999px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .title-wrap {
+      min-width: 0;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 10px;
+      padding: 4px 9px;
+      background: var(--accent-soft);
+      border-radius: 999px;
+    }
+
+    .eyebrow-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--accent);
+      display: inline-block;
+    }
+
+    .title {
+      margin: 0;
+      font-size: 24px;
+      font-weight: 700;
+      line-height: 1.1;
+      letter-spacing: -0.025em;
+      color: #0b1219;
+    }
+
+    .subtitle {
+      margin: 8px 0 0 0;
+      font-size: 13px;
+      line-height: 1.55;
+      color: var(--muted);
+      max-width: 32ch;
+    }
+
+    .city-badge {
+      flex-shrink: 0;
+      border: 1px solid var(--border);
+      background: white;
+      color: var(--muted);
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin: 14px 0 10px 0;
+    }
+
+    .stat-card {
+      background: var(--panel-strong);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 13px 11px 13px;
+      box-shadow: var(--shadow-sm);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .stat-card::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 3px;
+      background: var(--accent);
+    }
+
+    .stat-card.market::before { background: var(--market); }
+
+    .stat-label {
+      font-size: 10.5px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .stat-value {
+      font-size: 24px;
+      font-weight: 700;
+      line-height: 1;
+      letter-spacing: -0.03em;
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .section {
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+    }
+
+    .section-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .section-head h3 {
+      margin: 0;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #2b3848;
+    }
+
+    .section-note {
+      font-size: 11px;
+      color: var(--faint);
+    }
+
+    .control-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+    }
+
+    .btn-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .btn {
+      appearance: none;
+      border: 1px solid var(--border);
+      background: white;
+      color: var(--text);
+      padding: 9px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 12.5px;
+      font-weight: 600;
+      letter-spacing: -0.005em;
+      transition: background 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
+    }
+
+    .btn:hover {
+      border-color: var(--border-strong);
+      background: #fafcff;
+    }
+
+    .btn.active {
+      background: var(--accent);
+      color: white;
+      border-color: var(--accent);
+      box-shadow: 0 1px 0 var(--accent-dark) inset, 0 6px 14px rgba(10, 110, 132, 0.22);
+    }
+
+    .btn.secondary.active {
+      background: #1a2330;
+      color: white;
+      border-color: #1a2330;
+      box-shadow: 0 6px 14px rgba(26, 35, 48, 0.20);
+    }
+
+    .btn.small {
+      flex: 1 1 0;
+      min-width: 0;
+      text-align: center;
+    }
+
+    .input-wrap {
+      display: grid;
+      gap: 8px;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      padding: 11px 13px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: white;
+      color: var(--text);
+      font-size: 13.5px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 140ms ease, box-shadow 140ms ease;
+    }
+
+    input[type="text"]:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+
+    .action-btn {
+      width: 100%;
+      border: none;
+      border-radius: 8px;
+      padding: 11px 14px;
+      background: var(--accent);
+      color: white;
+      font-size: 13.5px;
+      font-weight: 600;
+      letter-spacing: -0.005em;
+      cursor: pointer;
+      transition: background 140ms ease, box-shadow 140ms ease;
+      box-shadow: 0 4px 12px rgba(10, 110, 132, 0.22);
+    }
+
+    .action-btn:hover {
+      background: var(--accent-dark);
+    }
+
+    .action-btn.gray {
+      background: #475569;
+      box-shadow: none;
+    }
+
+    .action-btn.gray:hover {
+      background: #2f3b4d;
+    }
+
+    .action-btn[disabled],
+    .action-btn[disabled]:hover {
+      background: #cdd5df;
+      color: #6b7587;
+      box-shadow: none;
+      cursor: not-allowed;
+    }
+
+    .action-btn.gray[disabled],
+    .action-btn.gray[disabled]:hover {
+      background: #cdd5df;
+      color: #6b7587;
+    }
+
+    .legend {
+      display: grid;
+      gap: 8px;
+    }
+
+    .legend-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      font-size: 11.5px;
+      font-weight: 500;
+      color: #2b3848;
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+    }
+
+    .legend-item.wide {
+      grid-column: 1 / -1;
+    }
+
+    .swatch {
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+      border: 1px solid rgba(0,0,0,0.10);
+      flex-shrink: 0;
+    }
+
+    .results {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      font-size: 12px;
+      color: #1f2a37;
+      line-height: 1.55;
+      min-height: 112px;
+    }
+
+    .results strong {
+      color: var(--text);
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      padding: 4px 9px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent-dark);
+      margin-top: 6px;
+    }
+
+    .results-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .results-kpi {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px 10px;
+    }
+
+    .results-kpi-label {
+      font-size: 9.5px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--faint);
+      margin-bottom: 4px;
+    }
+
+    .results-kpi-value {
+      font-size: 18px;
+      font-weight: 700;
+      line-height: 1;
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .footer-note {
+      margin-top: 10px;
+      font-size: 11px;
+      color: var(--faint);
+      line-height: 1.45;
+    }
+
+    .mapboxgl-ctrl-group {
+      border-radius: 8px !important;
+      overflow: hidden;
+      box-shadow: var(--shadow-md);
+      border: 1px solid var(--border) !important;
+    }
+
+    .mapboxgl-popup-content {
+      border-radius: 12px;
+      padding: 14px 14px 12px 14px;
+      font-family: 'Inter', sans-serif;
+      box-shadow: var(--shadow-lg);
+      border: 1px solid var(--border);
+    }
+
+    .popup-title {
+      font-weight: 700;
+      font-size: 14.5px;
+      margin-bottom: 4px;
+      color: var(--text);
+      letter-spacing: -0.02em;
+    }
+
+    .popup-type {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    .popup-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      display: inline-block;
+    }
+
+    .popup-address {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.45;
+      margin-bottom: 10px;
+    }
+
+    .popup-meta {
+      display: inline-block;
+      font-size: 10.5px;
+      font-weight: 600;
+      color: var(--accent-dark);
+      background: var(--accent-soft);
+      border-radius: 6px;
+      padding: 4px 8px;
+    }
+
+    /* Welcome modal */
+    .welcome-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 24, 34, 0.55);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 20px;
+      opacity: 1;
+      transition: opacity 220ms ease;
+    }
+
+    .welcome-overlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .welcome-card {
+      width: min(540px, 100%);
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 30px 60px rgba(0,0,0,0.30);
+      padding: 28px 28px 22px 28px;
+      transform: translateY(0);
+      transition: transform 240ms ease;
+      max-height: calc(100vh - 40px);
+      overflow-y: auto;
+    }
+
+    .welcome-overlay.hidden .welcome-card { transform: translateY(8px); }
+
+    .welcome-eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+      background: var(--accent-soft);
+      padding: 5px 10px;
+      border-radius: 999px;
+      margin-bottom: 14px;
+    }
+
+    .welcome-eyebrow .eyebrow-dot {
+      width: 6px; height: 6px; border-radius: 999px;
+      background: var(--accent);
+      display: inline-block;
+    }
+
+    .welcome-title {
+      margin: 0 0 8px 0;
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      line-height: 1.15;
+      color: #0b1219;
+    }
+
+    .welcome-lead {
+      margin: 0 0 18px 0;
+      font-size: 14px;
+      line-height: 1.6;
+      color: var(--muted);
+    }
+
+    .welcome-steps {
+      display: grid;
+      gap: 10px;
+      margin: 0 0 20px 0;
+    }
+
+    .welcome-step {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 13px;
+    }
+
+    .welcome-step-num {
+      flex-shrink: 0;
+      width: 24px; height: 24px;
+      border-radius: 6px;
+      background: var(--accent);
+      color: white;
+      font-size: 12px;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .welcome-step-body {
+      font-size: 13px;
+      line-height: 1.5;
+      color: #1f2a37;
+    }
+
+    .welcome-step-body strong {
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .welcome-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .welcome-actions .action-btn {
+      width: auto;
+      padding: 11px 22px;
+    }
+
+    .welcome-skip {
+      font-size: 12px;
+      color: var(--faint);
+    }
+
+    @media (max-width: 540px) {
+      .welcome-card { padding: 22px 20px 18px 20px; }
+      .welcome-title { font-size: 22px; }
+    }
+
+    @media (max-width: 900px) {
+      .sidebar {
+        width: min(420px, calc(100% - 24px));
+      }
+    }
+
+    @media (max-width: 720px) {
+      .sidebar {
+        top: auto;
+        bottom: 12px;
+        left: 12px;
+        right: 12px;
+        width: auto;
+        max-width: none;
+        max-height: 48vh;
+        border-radius: 22px;
+      }
+
+      .title {
+        font-size: 22px;
+      }
+
+      .stats-row,
+      .results-grid,
+      .legend-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .city-badge {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <!-- Welcome modal -->
+  <div class="welcome-overlay" id="welcome-overlay" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
+    <div class="welcome-card">
+      <div class="welcome-eyebrow"><span class="eyebrow-dot"></span> Welcome</div>
+      <h2 class="welcome-title" id="welcome-title">Philadelphia Food Access</h2>
+      <p class="welcome-lead">
+        An interactive map of how easily Philadelphians can reach a grocery store or farmers market on foot, by bike, or by car. Use it to spot neighborhoods with strong access &mdash; and the gaps in between.
+      </p>
+      <div class="welcome-steps">
+        <div class="welcome-step">
+          <span class="welcome-step-num">1</span>
+          <div class="welcome-step-body">
+            Pick a <strong>travel mode</strong> (walking, cycling, driving) and a <strong>time threshold</strong> (5, 10, or 15 minutes) in the sidebar. The access surface uses a single warm color across all thresholds &mdash; only the area changes.
+          </div>
+        </div>
+        <div class="welcome-step">
+          <span class="welcome-step-num">2</span>
+          <div class="welcome-step-body">
+            <strong>Click anywhere on the map</strong> to drop a pin and see what is reachable from that point &mdash; or click a store or market icon directly.
+          </div>
+        </div>
+        <div class="welcome-step">
+          <span class="welcome-step-num">3</span>
+          <div class="welcome-step-body">
+            Five <strong>recommended grocery sites</strong> (gold squares) show where a new store would close the biggest access gaps. Click any card to fly to that spot.
+          </div>
+        </div>
+      </div>
+      <div class="welcome-actions">
+        <span class="welcome-skip">Press <strong>Esc</strong> any time to reopen this guide.</span>
+        <button class="action-btn" id="welcome-start">Explore the map</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="topbar">
+        <div class="title-wrap">
+          <div class="eyebrow"><span class="eyebrow-dot"></span> Accessibility analysis</div>
+          <h1 class="title">Philadelphia Food Access</h1>
+          <p class="subtitle">
+            Explore grocery stores, farmers markets, and travel-time access patterns across Philadelphia.
+          </p>
+        </div>
+        <div class="city-badge">Philadelphia, PA</div>
+      </div>
+
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-label">Grocery stores</div>
+          <div class="stat-value" id="grocery-count">--</div>
+        </div>
+        <div class="stat-card market">
+          <div class="stat-label">Farmers markets</div>
+          <div class="stat-value" id="market-count">--</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <h3>Travel mode</h3>
+          <span class="section-note">Choose how access is measured</span>
+        </div>
+        <div class="control-card">
+          <div class="btn-row" id="mode-group">
+            <button class="btn active" data-mode="walking">Walking</button>
+            <button class="btn" data-mode="cycling">Cycling</button>
+            <button class="btn" data-mode="driving">Driving</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <h3>Travel time</h3>
+          <span class="section-note">Select a threshold</span>
+        </div>
+        <div class="control-card">
+          <div class="btn-row" id="time-group">
+            <button class="btn small active" data-time="5">5 min</button>
+            <button class="btn small" data-time="10">10 min</button>
+            <button class="btn small" data-time="15">15 min</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <h3>Analysis mode</h3>
+          <span class="section-note">Single site or system-wide</span>
+        </div>
+        <div class="control-card">
+          <div class="btn-row" id="analysis-group">
+            <button class="btn secondary active" data-analysis="single">Clicked location</button>
+            <button class="btn secondary" data-analysis="grocery">All grocery stores</button>
+            <button class="btn secondary" data-analysis="markets">All farmers markets</button>
+            <button class="btn secondary" data-analysis="both">Both together</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="section" id="pin-section">
+        <div class="section-head">
+          <h3>Drop a pin</h3>
+          <span class="section-note">Click anywhere on the map</span>
+        </div>
+        <div class="control-card input-wrap">
+          <div class="pin-hint" id="pin-hint">Tap any spot on the map to set a reference point. We'll calculate what is reachable from there.</div>
+          <button class="action-btn gray" id="clear-pin" disabled>Remove pin</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <h3>Map actions</h3>
+          <span class="section-note">Reset or reframe the view</span>
+        </div>
+        <div class="control-card input-wrap">
+          <button class="action-btn gray" id="clear-map">Clear current analysis</button>
+          <button class="action-btn gray" id="zoom-city">Zoom to city extent</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <h3>Legend</h3>
+          <span class="section-note">Active symbology</span>
+        </div>
+        <div class="legend">
+          <div class="legend-grid">
+            <div class="legend-item"><span class="swatch" style="background:#1f6fb2;"></span> Grocery stores</div>
+            <div class="legend-item"><span class="swatch" style="background:#1f8f5a;"></span> Farmers markets</div>
+            <div class="legend-item"><span class="swatch" style="background:#d4a017;border-radius:4px;"></span> Recommended new sites</div>
+            <div class="legend-item wide"><span class="swatch" style="background:#fbd197;"></span> Travel-time access area</div>
+            <div class="legend-item wide"><span class="swatch" style="background:#6f5b8e;"></span> Outside selected travel-time access</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <h3>Current results</h3>
+          <span class="section-note">Updates with each selection</span>
+        </div>
+        <div class="results" id="results-box">
+          Click anywhere on the map to drop a pin, click a store or market, or run a citywide accessibility view.
+        </div>
+      </div>
+
+      <div class="section" id="recs-section">
+        <div class="section-head">
+          <h3>Recommended store sites</h3>
+          <span class="section-note">5 spots beyond a 15-min walk of any grocery</span>
+        </div>
+        <div class="control-card recs-card">
+          <div class="recs-status" id="recs-status">Finding spots more than a 15-min walk from any grocery, where a new store would help the most people&hellip;</div>
+          <div class="tool-row">
+            <button class="action-btn" id="recs-recompute">Recalculate</button>
+            <button class="action-btn gray" id="recs-toggle">Hide on map</button>
+          </div>
+          <div class="recs-list" id="recs-list"></div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.20.0/mapbox-gl.js"></script>
+  <script>
+  mapboxgl.accessToken = 'pk.eyJ1IjoidHVqOTc4OTMiLCJhIjoiY21scGo0dmJwMDRoNjNob3I1MzY5c2U5diJ9.ytQylqm3thRGx1tkAEcbGg';
+
+  const PHILLY_BBOX = [-75.2803, 39.8670, -74.9558, 40.1379];
+  const CENSUS_YEAR = '2024';
+
+  const state = {
+    mode: 'walking',
+    time: 5,
+    analysis: 'single',
+    selectedFeature: null,
+    addressFeature: null,
+    groceryData: null,
+    marketData: null,
+    cityBoundary: null,
+    tractData: null,
+    addressMarker: null,
+    isoCache: new Map(),
+    supplementalCount: 0,
+    latestIsoFeature: null,
+    latestDesertFeature: null,
+    latestReachable: null,
+    latestNearest: null,
+    latestImpacted: null,
+    currentResultTitle: null
+  };
+
+  const map = new mapboxgl.Map({
+    container: 'map',
+    style: 'mapbox://styles/mapbox/light-v11',
+    center: [-75.1652, 39.9526],
+    zoom: 10.3
+  });
+
+  map.addControl(new mapboxgl.NavigationControl(), 'top-right');
+
+  injectProfessionalUI();
+  setupWelcomeModal();
+
+  function setupWelcomeModal() {
+    const overlay = document.getElementById('welcome-overlay');
+    const startBtn = document.getElementById('welcome-start');
+    if (!overlay || !startBtn) return;
+
+    const openModal = () => { overlay.classList.remove('hidden'); };
+    const closeModal = () => { overlay.classList.add('hidden'); };
+
+    startBtn.addEventListener('click', closeModal);
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) closeModal();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        if (overlay.classList.contains('hidden')) openModal();
+        else closeModal();
+      }
+    });
+  }
+
+  function injectProfessionalUI() {
+    const oldTimeButton = document.querySelector('#time-group .btn[data-time="20"]');
+    if (oldTimeButton) {
+      oldTimeButton.dataset.time = '15';
+      oldTimeButton.textContent = '15 min';
+    }
+
+    document.querySelectorAll('.legend-item').forEach(item => {
+      item.innerHTML = item.innerHTML.replace('20-minute access', '15-minute access');
+      item.innerHTML = item.innerHTML.replace('Lower-access area within city boundary', 'Outside selected travel-time access');
+    });
+
+    if (!document.getElementById('professional-ui-styles')) {
+      const style = document.createElement('style');
+      style.id = 'professional-ui-styles';
+      style.textContent = `
+        .tool-row {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 8px;
+          margin-top: 6px;
+        }
+
+        .pin-hint {
+          font-size: 12px;
+          line-height: 1.55;
+          color: var(--muted);
+          margin-bottom: 8px;
+        }
+
+        .pin-hint.armed {
+          color: var(--accent-dark);
+          font-weight: 600;
+        }
+
+        .recs-card { gap: 10px; display: grid; }
+        .recs-status {
+          font-size: 12px;
+          color: var(--muted);
+          line-height: 1.5;
+          padding: 2px 0;
+        }
+        .recs-list {
+          display: grid;
+          gap: 8px;
+          max-height: 360px;
+          overflow-y: auto;
+          padding-right: 2px;
+        }
+        .rec-row {
+          background: white;
+          border: 1px solid var(--border);
+          border-radius: 12px;
+          padding: 11px 12px 10px 12px;
+          display: grid;
+          gap: 6px;
+          cursor: pointer;
+          transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
+          text-align: left;
+          font: inherit;
+          color: inherit;
+          width: 100%;
+        }
+        .rec-row:hover {
+          border-color: var(--rec);
+          box-shadow: var(--shadow-sm);
+        }
+        .rec-row.active {
+          border-color: var(--rec);
+          background: var(--rec-soft);
+          box-shadow: var(--shadow-sm);
+        }
+        .rec-row-head {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .rec-rank {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 24px;
+          height: 24px;
+          border-radius: 8px;
+          background: var(--rec);
+          color: white;
+          font-size: 12px;
+          font-weight: 800;
+          flex-shrink: 0;
+        }
+        .rec-row-title {
+          font-size: 13px;
+          font-weight: 700;
+          color: #1a1a1a;
+          line-height: 1.25;
+        }
+        .rec-row-stats {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 6px 10px;
+          font-size: 11px;
+          color: var(--muted);
+        }
+        .rec-row-stat strong {
+          display: block;
+          font-size: 13px;
+          font-weight: 800;
+          color: var(--text);
+          letter-spacing: -0.01em;
+        }
+        .rec-row-why {
+          font-size: 11.5px;
+          color: var(--muted);
+          line-height: 1.45;
+          padding-top: 4px;
+          border-top: 1px dashed var(--border);
+        }
+        .recs-empty {
+          font-size: 12px;
+          color: var(--faint);
+          text-align: center;
+          padding: 14px 6px;
+        }
+
+        .mini-toggle {
+          display: grid;
+          gap: 8px;
+        }
+
+        .toggle-item {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+          background: rgba(255,255,255,0.72);
+          border: 1px solid var(--border);
+          border-radius: 14px;
+          padding: 10px 11px;
+          font-size: 12px;
+          font-weight: 700;
+          color: #3f3a34;
+        }
+
+        .toggle-item input {
+          accent-color: var(--accent);
+          width: 16px;
+          height: 16px;
+        }
+
+        .method-panel {
+          display: none;
+          background: #fbf9f5;
+          border: 1px solid var(--border);
+          border-radius: 16px;
+          padding: 12px;
+          font-size: 12px;
+          color: #4e4740;
+          line-height: 1.55;
+          margin-top: 8px;
+        }
+
+        .method-panel.open {
+          display: block;
+        }
+
+        .store-list {
+          margin-top: 10px;
+          display: grid;
+          gap: 6px;
+        }
+
+        .store-row {
+          background: white;
+          border: 1px solid var(--border);
+          border-radius: 12px;
+          padding: 8px 9px;
+          display: grid;
+          gap: 2px;
+        }
+
+        .store-name {
+          font-size: 12px;
+          font-weight: 800;
+          color: #24211e;
+        }
+
+        .store-meta {
+          font-size: 11px;
+          color: var(--muted);
+        }
+
+        .basemap-select {
+          width: 100%;
+          padding: 11px 12px;
+          border-radius: 14px;
+          border: 1px solid var(--border);
+          background: white;
+          color: var(--text);
+          font-size: 13px;
+          font-weight: 700;
+          outline: none;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    const pinSection = document.getElementById('pin-section');
+
+    if (pinSection && !document.getElementById('toggle-groceries')) {
+      pinSection.insertAdjacentHTML('afterend', `
+        <div class="section">
+          <div class="section-head">
+            <h3>Map layers</h3>
+            <span class="section-note">Filter visible data</span>
+          </div>
+          <div class="control-card mini-toggle">
+            <label class="toggle-item">Grocery stores <input type="checkbox" id="toggle-groceries" checked /></label>
+            <label class="toggle-item">Farmers markets <input type="checkbox" id="toggle-markets" checked /></label>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-head">
+            <h3>Basemap</h3>
+            <span class="section-note">Presentation style</span>
+          </div>
+          <div class="control-card">
+            <select class="basemap-select" id="basemap-select">
+              <option value="mapbox://styles/mapbox/light-v11" selected>Light</option>
+              <option value="mapbox://styles/mapbox/dark-v11">Dark</option>
+              <option value="mapbox://styles/mapbox/satellite-streets-v12">Satellite streets</option>
+            </select>
+          </div>
+        </div>
+      `);
+    }
+
+    const clearButton = document.getElementById('clear-map');
+    const mapActionCard = clearButton?.closest('.control-card');
+
+    if (mapActionCard && !document.getElementById('export-csv')) {
+      mapActionCard.insertAdjacentHTML('beforeend', `
+        <div class="tool-row">
+          <button class="action-btn gray" id="export-csv">Export CSV</button>
+          <button class="action-btn gray" id="export-geojson">Export GeoJSON</button>
+        </div>
+        <button class="action-btn gray" id="toggle-methods">Show methods</button>
+        <div class="method-panel" id="methods-panel">
+          This app measures access to grocery stores and farmers markets within Philadelphia using Mapbox travel-time isochrones, local GeoJSON layers, and Turf.js spatial operations. Click any spot inside the city to drop a pin and run a single-point analysis; click stores or markets to analyze from those locations; or run system-wide views across all groceries and markets. Reachable and outside-access populations are estimated by checking which census-tract centroids fall inside or outside the active travel-time surface. <strong>Recommended store sites</strong> are computed by building a merged 15-minute walking surface around every existing grocery (clipped to city limits), overlaying a hex grid of candidate points across Philadelphia, then scoring each candidate by the population it would newly serve within a 15-min walk (~0.75 mi) — only counting tracts whose centroid is currently outside the existing walkshed. Scores are weighted up by local poverty rate and distance from the nearest existing grocery. The top 5 are picked greedily with a 1-mile minimum spacing so suggestions don't cluster. All accessibility surfaces are clipped to the Philadelphia city boundary.
+        </div>
+      `);
+    }
+  }
+
+  function updateResults(html) {
+    document.getElementById('results-box').innerHTML = html;
+  }
+
+  function updateTopCounts() {
+    document.getElementById('grocery-count').textContent = state.groceryData?.features.length ?? '--';
+    document.getElementById('market-count').textContent = state.marketData?.features.length ?? '--';
+  }
+
+  function setActiveButton(groupId, attrName, value) {
+    document.querySelectorAll(`#${groupId} .btn`).forEach(btn => {
+      btn.classList.toggle('active', btn.dataset[attrName] === String(value));
+    });
+  }
+
+  function cleanName(name) {
+    if (!name) return 'Unnamed location';
+    return name
+      .replace(/\s+\d+([-\s]\d+)*$/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  }
+
+  function getPointName(props) {
+    const raw = props.Store_Name || props.store_name || props.Market_Name || props.market_name || props.name || 'Unnamed location';
+    return cleanName(raw);
+  }
+
+  function getPointAddress(props) {
+    return props.Address || props.address || props.ADDRESS || 'Address not available';
+  }
+
+  function popupHTML(props, kindLabel, dotColor) {
+    const name = getPointName(props);
+    const address = getPointAddress(props);
+    const city = props.City || props.city || 'Philadelphia';
+    const zip = props.Zip5 || props.zip || '';
+
+    return `
+      <div>
+        <div class="popup-title">${name}</div>
+        <div class="popup-type">
+          <span class="popup-dot" style="background:${dotColor};"></span>
+          ${kindLabel}
+        </div>
+        <div class="popup-address">${address}${city ? ', ' + city : ''}${zip ? ' ' + zip : ''}</div>
+        <div class="popup-meta">Click to generate ${state.time}-minute ${state.mode} access</div>
+      </div>
+    `;
+  }
+
+  function getTimeColor(time) {
+    // Use a single warm peach for all travel-time thresholds (unified look).
+    // Slightly more saturated than the original 5-min token so it stays
+    // readable on both light and satellite basemaps.
+    return '#fbd197';
+  }
+
+  // Returns true when the current basemap is dark/satellite, so we can boost
+  // fill opacity and outline contrast.
+  function isDarkBasemap() {
+    const select = document.getElementById('basemap-select');
+    if (!select) return false;
+    const v = select.value || '';
+    return v.includes('dark') || v.includes('satellite');
+  }
+
+  function getIsoPaint() {
+    const dark = isDarkBasemap();
+    return {
+      fillOpacity: dark ? 0.62 : 0.48,
+      lineColor: dark ? '#ffffff' : '#b88a4a',
+      lineOpacity: dark ? 0.95 : 0.9,
+      lineWidth: dark ? 1.8 : 1.4
+    };
+  }
+
+  const supplementalGroceries = [
+    {
+      Store_Name: 'The Fresh Grocer - Progress Plaza / Temple University',
+      Address: '1501 N Broad St',
+      City: 'Philadelphia',
+      Zip5: '19122',
+      source: 'Supplemental verified grocery location',
+      supplemental: true,
+      coordinates: [-75.15856, 39.97837]
+    },
+    {
+      Store_Name: 'The Fresh Grocer - La Salle / Chew Ave',
+      Address: '5301 Chew Ave',
+      City: 'Philadelphia',
+      Zip5: '19138',
+      source: 'Supplemental verified grocery location',
+      supplemental: true,
+      coordinates: [-75.16191, 40.03436]
+    },
+    {
+      Store_Name: 'GIANT - Riverwalk',
+      Address: '60 N 23rd St',
+      City: 'Philadelphia',
+      Zip5: '19103',
+      source: 'Supplemental verified grocery location',
+      supplemental: true,
+      coordinates: [-75.17914, 39.95442]
+    },
+    {
+      Store_Name: "Trader Joe's - Arch St",
+      Address: '1324 Arch St',
+      City: 'Philadelphia',
+      Zip5: '19107',
+      source: 'Supplemental verified grocery location',
+      supplemental: true,
+      coordinates: [-75.16225, 39.95437]
+    },
+    {
+      Store_Name: "Trader Joe's - Center City / Market St",
+      Address: '2121 Market St',
+      City: 'Philadelphia',
+      Zip5: '19103',
+      source: 'Supplemental verified grocery location',
+      supplemental: true,
+      coordinates: [-75.17640, 39.95387]
+    },
+    {
+      Store_Name: 'Sprouts Farmers Market - South Broad',
+      Address: '1000 S Broad St',
+      City: 'Philadelphia',
+      Zip5: '19146',
+      source: 'Supplemental verified grocery location',
+      supplemental: true,
+      coordinates: [-75.16633, 39.93801]
+    },
+    {
+      Store_Name: 'Whole Foods Market - South Street',
+      Address: '929 South St',
+      City: 'Philadelphia',
+      Zip5: '19147',
+      source: 'Supplemental verified grocery location',
+      supplemental: true,
+      coordinates: [-75.15832, 39.94255]
+    },
+    {
+      Store_Name: 'ACME Markets - Society Hill',
+      Address: '309 S 5th St',
+      City: 'Philadelphia',
+      Zip5: '19106',
+      source: 'Supplemental verified grocery location',
+      supplemental: true,
+      coordinates: [-75.14923, 39.94484]
+    },
+    {
+      Store_Name: 'Grocery Outlet - Sharswood',
+      Address: '2077 Ridge Ave',
+      City: 'Philadelphia',
+      Zip5: '19121',
+      source: 'Supplemental verified grocery location',
+      supplemental: true,
+      coordinates: [-75.16907, 39.97737]
+    },
+    {
+      Store_Name: 'Grocery Outlet - Mount Airy',
+      Address: '25 W Hortter St',
+      City: 'Philadelphia',
+      Zip5: '19119',
+      source: 'Supplemental verified grocery location',
+      supplemental: true,
+      coordinates: [-75.185074, 40.050254]
+    },
+    {
+      Store_Name: 'Grocery Outlet - University City',
+      Address: '4301 Chestnut St',
+      City: 'Philadelphia',
+      Zip5: '19104',
+      source: 'Supplemental verified grocery location',
+      supplemental: true,
+      coordinates: [-75.208829, 39.956742]
+    },
+    {
+      Store_Name: 'Grocery Outlet - Norris Square',
+      Address: '1801 American St',
+      City: 'Philadelphia',
+      Zip5: '19122',
+      source: 'Supplemental verified grocery location',
+      supplemental: true,
+      coordinates: [-75.138288, 39.978704]
+    },
+    {
+      Store_Name: "Cousin's Fresh Market - Woodland",
+      Address: '6411 Woodland Ave',
+      City: 'Philadelphia',
+      Zip5: '19142',
+      source: 'Supplemental verified grocery location',
+      supplemental: true,
+      coordinates: [-75.233685, 39.926307]
+    },
+    {
+      Store_Name: "Cousin's Fresh Market - Carroll Park / Girard",
+      Address: '5429 W Girard Ave',
+      City: 'Philadelphia',
+      Zip5: '19131',
+      source: 'Supplemental verified grocery location',
+      supplemental: true,
+      coordinates: [-75.230068, 39.971227]
+    },
+    {
+      Store_Name: "Cousin's Fresh Market - Baltimore Ave",
+      Address: '5704 Baltimore Ave',
+      City: 'Philadelphia',
+      Zip5: '19143',
+      source: 'Supplemental verified grocery location',
+      supplemental: true,
+      coordinates: [-75.238489, 39.945516]
+    },
+    {
+      Store_Name: "Cousin's Supermarket - Juniata",
+      Address: '4037 N 5th St',
+      City: 'Philadelphia',
+      Zip5: '19140',
+      source: 'Supplemental verified grocery location',
+      supplemental: true,
+      coordinates: [-75.134953, 40.013221]
+    }
+  ];
+
+  function normalizeText(value) {
+    return String(value || '')
+      .toLowerCase()
+      .replace(/&/g, 'and')
+      .replace(/[^a-z0-9]/g, '');
+  }
+
+  function featureAddressKey(feature) {
+    const props = feature.properties || {};
+    return normalizeText(getPointAddress(props));
+  }
+
+  function featureNameAddressKey(feature) {
+    const props = feature.properties || {};
+    return normalizeText(`${getPointName(props)} ${getPointAddress(props)}`);
+  }
+
+  function buildSupplementalFeature(props) {
+    return {
+      type: 'Feature',
+      properties: {
+        Store_Name: props.Store_Name,
+        Address: props.Address,
+        City: props.City,
+        Zip5: props.Zip5,
+        source: props.source,
+        supplemental: props.supplemental
+      },
+      geometry: {
+        type: 'Point',
+        coordinates: props.coordinates
+      }
+    };
+  }
+
+  // Merges the hard-coded `supplementalGroceries` list into the loaded grocery
+  // FeatureCollection. Note: the city-boundary point-in-polygon check is only
+  // applied when `state.cityBoundary` is already set; in flows where this runs
+  // before the boundary loads, all supplemental points are added without that
+  // safety check (acceptable here because every supplemental coordinate is
+  // pre-vetted as inside Philadelphia).
+  function mergeSupplementalGroceries(groceryFc) {
+    const existing = new Set();
+
+    groceryFc.features.forEach(feature => {
+      existing.add(featureAddressKey(feature));
+      existing.add(featureNameAddressKey(feature));
+    });
+
+    let added = 0;
+
+    supplementalGroceries.forEach(props => {
+      const feature = buildSupplementalFeature(props);
+      const keys = [featureAddressKey(feature), featureNameAddressKey(feature)];
+      const alreadyLoaded = keys.some(key => key && existing.has(key));
+
+      if (alreadyLoaded) return;
+
+      if (state.cityBoundary) {
+        try {
+          if (!turf.booleanPointInPolygon(feature, state.cityBoundary)) return;
+        } catch (e) {
+          console.warn('Could not validate city boundary for supplemental grocery:', props.Store_Name, e);
+        }
+      }
+
+      groceryFc.features.push(feature);
+      keys.forEach(key => {
+        if (key) existing.add(key);
+      });
+      added += 1;
+    });
+
+    return added;
+  }
+
+  function assignFeatureIds(fc) {
+    fc.features.forEach((f, i) => {
+      f.id = i;
+    });
+    return fc;
+  }
+
+  function fitToGeoJSON(geojson) {
+    const bounds = new mapboxgl.LngLatBounds();
+
+    geojson.features.forEach(feature => {
+      const geom = feature.geometry;
+      if (!geom) return;
+
+      if (geom.type === 'Point') bounds.extend(geom.coordinates);
+      if (geom.type === 'Polygon') geom.coordinates.flat().forEach(c => bounds.extend(c));
+      if (geom.type === 'MultiPolygon') geom.coordinates.flat(2).forEach(c => bounds.extend(c));
+    });
+
+    if (!bounds.isEmpty()) {
+      map.fitBounds(bounds, { padding: 50, duration: 900 });
+    }
+  }
+
+  function zoomToCity() {
+    if (!state.cityBoundary) return;
+
+    fitToGeoJSON({
+      type: 'FeatureCollection',
+      features: [state.cityBoundary]
+    });
+  }
+
+  function ensureSource(id, data) {
+    if (map.getSource(id)) {
+      map.getSource(id).setData(data);
+    } else {
+      map.addSource(id, { type: 'geojson', data });
+    }
+  }
+
+  function setLayerVisibility(layerIds, visible) {
+    layerIds.forEach(id => {
+      if (map.getLayer(id)) {
+        map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none');
+      }
+    });
+  }
+
+  function clearAnalysisLayers() {
+    ['iso-fill', 'iso-line', 'desert-fill', 'desert-line'].forEach(id => {
+      if (map.getLayer(id)) map.removeLayer(id);
+    });
+
+    ['iso-source', 'desert-source'].forEach(id => {
+      if (map.getSource(id)) map.removeSource(id);
+    });
+
+    if (state.addressMarker) {
+      state.addressMarker.remove();
+      state.addressMarker = null;
+    }
+
+    state.latestIsoFeature = null;
+    state.latestDesertFeature = null;
+    state.latestReachable = null;
+    state.latestNearest = null;
+    state.latestImpacted = null;
+    state.currentResultTitle = null;
+  }
+
+  function unionFeatures(features) {
+    if (!features.length) return null;
+
+    let merged = features[0];
+
+    for (let i = 1; i < features.length; i++) {
+      try {
+        merged = turf.union(merged, features[i]);
+      } catch (firstErr) {
+        try {
+          merged = turf.union(turf.featureCollection([merged, features[i]]));
+        } catch (secondErr) {
+          console.warn('Could not union feature:', secondErr);
+        }
+      }
+    }
+
+    return merged;
+  }
+
+  function differenceFeatures(a, b) {
+    try {
+      return turf.difference(a, b);
+    } catch (firstErr) {
+      try {
+        return turf.difference(turf.featureCollection([a, b]));
+      } catch (secondErr) {
+        console.warn('Could not create difference polygon:', secondErr);
+        return null;
+      }
+    }
+  }
+
+  // Clip any polygon feature to the Philadelphia city boundary.
+  // Returns null if intersection fails or yields nothing.
+  function clipToCity(feature) {
+    if (!feature || !state.cityBoundary) return feature;
+    try {
+      const clipped = turf.intersect(feature, state.cityBoundary);
+      return clipped || null;
+    } catch (firstErr) {
+      try {
+        const clipped = turf.intersect(turf.featureCollection([feature, state.cityBoundary]));
+        return clipped || null;
+      } catch (secondErr) {
+        console.warn('Could not clip to city boundary:', secondErr);
+        return feature; // fall back to unclipped
+      }
+    }
+  }
+
+  function drawIsoAndDesert(isoFeature) {
+    ['iso-fill', 'iso-line', 'desert-fill', 'desert-line'].forEach(id => {
+      if (map.getLayer(id)) map.removeLayer(id);
+    });
+
+    ['iso-source', 'desert-source'].forEach(id => {
+      if (map.getSource(id)) map.removeSource(id);
+    });
+
+    // Clip iso to Philadelphia city limits so accessibility never spills outside the city
+    const clippedIso = clipToCity(isoFeature) || isoFeature;
+
+    state.latestIsoFeature = clippedIso;
+    state.latestDesertFeature = null;
+
+    ensureSource('iso-source', clippedIso);
+
+    const isoPaint = getIsoPaint();
+
+    map.addLayer({
+      id: 'iso-fill',
+      type: 'fill',
+      source: 'iso-source',
+      paint: {
+        'fill-color': getTimeColor(state.time),
+        'fill-opacity': isoPaint.fillOpacity
+      }
+    });
+
+    map.addLayer({
+      id: 'iso-line',
+      type: 'line',
+      source: 'iso-source',
+      paint: {
+        'line-color': isoPaint.lineColor,
+        'line-width': isoPaint.lineWidth,
+        'line-opacity': isoPaint.lineOpacity
+      }
+    });
+
+    if (state.cityBoundary) {
+      const desert = differenceFeatures(state.cityBoundary, clippedIso);
+
+      if (desert) {
+        state.latestDesertFeature = desert;
+        ensureSource('desert-source', desert);
+
+        map.addLayer({
+          id: 'desert-fill',
+          type: 'fill',
+          source: 'desert-source',
+          paint: {
+            'fill-color': '#6f5b8e',
+            'fill-opacity': 0.18
+          }
+        }, 'iso-fill');
+
+        map.addLayer({
+          id: 'desert-line',
+          type: 'line',
+          source: 'desert-source',
+          paint: {
+            'line-color': '#4f3f6b',
+            'line-width': 0.9,
+            'line-dasharray': [2, 2],
+            'line-opacity': 0.55
+          }
+        }, 'iso-line');
+      }
+    }
+  }
+
+  async function geocodeAddress(addressText) {
+    const query = /philadelphia/i.test(addressText) ? addressText : `${addressText}, Philadelphia, PA`;
+    const bbox = PHILLY_BBOX.join(',');
+    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxgl.accessToken}&limit=1&types=address&country=us&bbox=${bbox}&proximity=-75.1652,39.9526`;
+
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Geocoding request failed.');
+
+    const data = await response.json();
+    if (!data.features || !data.features.length) {
+      throw new Error('No matching Philadelphia address found.');
+    }
+
+    const feature = data.features[0];
+    const point = turf.point(feature.center);
+
+    if (state.cityBoundary && !turf.booleanPointInPolygon(point, state.cityBoundary)) {
+      throw new Error('That address appears to be outside Philadelphia city limits.');
+    }
+
+    return feature;
+  }
+
+  async function getIsochrone(lon, lat, mode, time) {
+    const cacheKey = `${Number(lon).toFixed(5)},${Number(lat).toFixed(5)}-${mode}-${time}`;
+
+    if (state.isoCache.has(cacheKey)) {
+      return structuredClone(state.isoCache.get(cacheKey));
+    }
+
+    const profile = `mapbox/${mode}`;
+    const url = `https://api.mapbox.com/isochrone/v1/${profile}/${lon},${lat}?contours_minutes=${time}&polygons=true&denoise=1&generalize=50&access_token=${mapboxgl.accessToken}`;
+
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      const txt = await response.text();
+      throw new Error(`Isochrone request failed: ${response.status} ${txt}`);
+    }
+
+    const data = await response.json();
+    state.isoCache.set(cacheKey, data);
+
+    return structuredClone(data);
+  }
+
+  function filterReachablePoints(isoFeature) {
+    const groceryReachableIds = [];
+    const marketReachableIds = [];
+
+    state.groceryData.features.forEach(f => {
+      try {
+        if (turf.booleanPointInPolygon(f, isoFeature)) groceryReachableIds.push(f.id);
+      } catch (e) {}
+    });
+
+    state.marketData.features.forEach(f => {
+      try {
+        if (turf.booleanPointInPolygon(f, isoFeature)) marketReachableIds.push(f.id);
+      } catch (e) {}
+    });
+
+    if (map.getLayer('grocery-highlight')) {
+      map.setFilter('grocery-highlight', ['in', ['id'], ['literal', groceryReachableIds]]);
+    }
+
+    if (map.getLayer('market-highlight')) {
+      map.setFilter('market-highlight', ['in', ['id'], ['literal', marketReachableIds]]);
+    }
+
+    state.latestReachable = { groceryReachableIds, marketReachableIds };
+    return state.latestReachable;
+  }
+
+  function featureById(fc, id) {
+    return fc.features.find(f => f.id === id);
+  }
+
+  function formatMiles(miles) {
+    if (!Number.isFinite(miles)) return 'n/a';
+    return miles < 0.1 ? `${(miles * 5280).toFixed(0)} ft` : `${miles.toFixed(2)} mi`;
+  }
+
+  function nearestFeature(pointFeature, features) {
+    if (!features?.length) return null;
+
+    let best = null;
+
+    features.forEach(feature => {
+      try {
+        const distance = turf.distance(pointFeature, feature, { units: 'miles' });
+
+        if (!best || distance < best.distance) {
+          best = { feature, distance };
+        }
+      } catch (e) {}
+    });
+
+    return best;
+  }
+
+  function computeNearestFromPoint(pointFeature, reachable) {
+    const nearestGrocery = nearestFeature(pointFeature, state.groceryData.features);
+    const nearestMarket = nearestFeature(pointFeature, state.marketData.features);
+    const result = { nearestGrocery, nearestMarket };
+
+    if (nearestGrocery) {
+      result.groceryReachable = reachable.groceryReachableIds.includes(nearestGrocery.feature.id);
+    }
+
+    if (nearestMarket) {
+      result.marketReachable = reachable.marketReachableIds.includes(nearestMarket.feature.id);
+    }
+
+    state.latestNearest = result;
+    return result;
+  }
+
+  function reachableStoreRows(reachable) {
+    const groceries = reachable.groceryReachableIds
+      .slice(0, 8)
+      .map(id => ({ feature: featureById(state.groceryData, id), kind: 'Grocery' }))
+      .filter(d => d.feature);
+
+    const markets = reachable.marketReachableIds
+      .slice(0, 6)
+      .map(id => ({ feature: featureById(state.marketData, id), kind: 'Market' }))
+      .filter(d => d.feature);
+
+    const rows = [...groceries, ...markets];
+
+    if (!rows.length) {
+      return '<div class="footer-note">No food retail points fall inside this travel-time area.</div>';
+    }
+
+    return `
+      <div class="store-list">
+        ${rows.map(d => `
+          <div class="store-row">
+            <div class="store-name">${getPointName(d.feature.properties)}</div>
+            <div class="store-meta">${d.kind} · ${getPointAddress(d.feature.properties)}</div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  function nearestHTML(nearest) {
+    if (!nearest) return '';
+
+    const grocery = nearest.nearestGrocery;
+    const market = nearest.nearestMarket;
+
+    return `
+      <div class="results-grid">
+        <div class="results-kpi">
+          <div class="results-kpi-label">Nearest grocery</div>
+          <div class="results-kpi-value">${grocery ? formatMiles(grocery.distance) : '--'}</div>
+        </div>
+        <div class="results-kpi">
+          <div class="results-kpi-label">Nearest market</div>
+          <div class="results-kpi-value">${market ? formatMiles(market.distance) : '--'}</div>
+        </div>
+      </div>
+      <div class="footer-note">
+        ${grocery ? `Grocery: ${getPointName(grocery.feature.properties)} (${nearest.groceryReachable ? 'inside' : 'outside'} selected access).` : ''}
+        ${market ? ` Market: ${getPointName(market.feature.properties)} (${nearest.marketReachable ? 'inside' : 'outside'} selected access).` : ''}
+      </div>
+    `;
+  }
+
+  function estimateImpactedPopulation(desertFeature) {
+    if (!state.tractData) {
+      state.latestImpacted = null;
+      return null;
+    }
+
+    let outsidePop = 0;
+    let outsidePoverty = 0;
+    let outsideTracts = 0;
+    let insidePop = 0;
+    let insidePoverty = 0;
+    let insideTracts = 0;
+    const isoFeature = state.latestIsoFeature;
+
+    state.tractData.features.forEach(feature => {
+      try {
+        const centroid = turf.centroid(feature);
+        const pop = Number(feature.properties.population || 0);
+        const pov = Number(feature.properties.poverty || 0);
+
+        let isOutside = false;
+        if (desertFeature && turf.booleanPointInPolygon(centroid, desertFeature)) {
+          isOutside = true;
+        } else if (!desertFeature && isoFeature && !turf.booleanPointInPolygon(centroid, isoFeature)) {
+          isOutside = true;
+        }
+
+        if (isOutside) {
+          outsidePop += pop;
+          outsidePoverty += pov;
+          outsideTracts += 1;
+        } else if (isoFeature && turf.booleanPointInPolygon(centroid, isoFeature)) {
+          insidePop += pop;
+          insidePoverty += pov;
+          insideTracts += 1;
+        }
+      } catch (e) {}
+    });
+
+    state.latestImpacted = {
+      population: outsidePop,
+      poverty: outsidePoverty,
+      tracts: outsideTracts,
+      reachablePopulation: insidePop,
+      reachablePoverty: insidePoverty,
+      reachableTracts: insideTracts
+    };
+    return state.latestImpacted;
+  }
+
+  function impactedHTML(impacted) {
+    if (!impacted) return '';
+
+    const inside = impacted.reachablePopulation || 0;
+    const insidePov = impacted.reachablePoverty || 0;
+    const insideRate = inside ? Math.round((insidePov / inside) * 100) : 0;
+    const outsideRate = impacted.population ? Math.round((impacted.poverty / impacted.population) * 100) : 0;
+
+    return `
+      <div class="results-grid">
+        <div class="results-kpi">
+          <div class="results-kpi-label">Reachable pop.</div>
+          <div class="results-kpi-value">${Math.round(inside).toLocaleString()}</div>
+        </div>
+        <div class="results-kpi">
+          <div class="results-kpi-label">Outside-access pop.</div>
+          <div class="results-kpi-value">${Math.round(impacted.population).toLocaleString()}</div>
+        </div>
+      </div>
+      <div class="results-grid">
+        <div class="results-kpi">
+          <div class="results-kpi-label">Poverty (reachable)</div>
+          <div class="results-kpi-value">${insideRate}%</div>
+        </div>
+        <div class="results-kpi">
+          <div class="results-kpi-label">Poverty (outside)</div>
+          <div class="results-kpi-value">${outsideRate}%</div>
+        </div>
+      </div>
+      <div class="footer-note">Estimated by counting census tracts whose centroid falls inside (reachable) or outside (no-access) the active travel-time surface. ${impacted.reachableTracts} reachable tracts, ${impacted.tracts} no-access tracts.</div>
+    `;
+  }
+
+  function renderResults(title, subtitle, reachable, nearest = null) {
+    state.currentResultTitle = title;
+
+    const impacted = estimateImpactedPopulation(state.latestDesertFeature);
+
+    updateResults(`
+      <strong>${title}</strong><br>
+      ${subtitle}
+      <div class="pill">${state.mode} · ${state.time} minutes</div>
+
+      <div class="results-grid">
+        <div class="results-kpi">
+          <div class="results-kpi-label">Reachable groceries</div>
+          <div class="results-kpi-value">${reachable.groceryReachableIds.length}</div>
+        </div>
+        <div class="results-kpi">
+          <div class="results-kpi-label">Reachable markets</div>
+          <div class="results-kpi-value">${reachable.marketReachableIds.length}</div>
+        </div>
+      </div>
+
+      ${nearestHTML(nearest)}
+      ${impactedHTML(impacted)}
+      ${reachableStoreRows(reachable)}
+
+      <div class="footer-note">Warm peach fill shows the active travel-time surface. Slate-purple shading marks areas outside selected travel-time access within Philadelphia.</div>
+    `);
+  }
+
+  async function runSingleFeatureAnalysis(feature, label) {
+    const [lon, lat] = feature.geometry.coordinates;
+    const isoFc = await getIsochrone(lon, lat, state.mode, state.time);
+
+    if (!isoFc.features || !isoFc.features.length) {
+      throw new Error('No isochrone returned.');
+    }
+
+    const isoFeature = isoFc.features[0];
+
+    drawIsoAndDesert(isoFeature);
+
+    const reachable = filterReachablePoints(isoFeature);
+    const nearest = computeNearestFromPoint(turf.point(feature.geometry.coordinates), reachable);
+
+    renderResults(label, 'Selected site analysis', reachable, nearest);
+  }
+
+  async function runAddressAnalysis() {
+    if (!state.addressFeature) return;
+
+    const [lon, lat] = state.addressFeature.center;
+    const isoFc = await getIsochrone(lon, lat, state.mode, state.time);
+
+    if (!isoFc.features || !isoFc.features.length) {
+      throw new Error('No isochrone returned.');
+    }
+
+    const isoFeature = isoFc.features[0];
+
+    drawIsoAndDesert(isoFeature);
+
+    const reachable = filterReachablePoints(isoFeature);
+    const nearest = computeNearestFromPoint(turf.point([lon, lat]), reachable);
+
+    renderResults(
+      'Address-based analysis',
+      `${state.addressFeature.place_name}<br>`,
+      reachable,
+      nearest
+    );
+  }
+
+  async function runAllSitesAnalysis() {
+    let sourceFeatures = [];
+
+    if (state.analysis === 'grocery') sourceFeatures = state.groceryData.features;
+    if (state.analysis === 'markets') sourceFeatures = state.marketData.features;
+    if (state.analysis === 'both') sourceFeatures = [...state.groceryData.features, ...state.marketData.features];
+
+    updateResults(`Generating ${sourceFeatures.length} isochrones for the selected citywide view...`);
+
+    const isoFeatures = [];
+
+    for (let i = 0; i < sourceFeatures.length; i++) {
+      const feature = sourceFeatures[i];
+
+      if (i > 0 && i % 10 === 0) {
+        updateResults(`Generating citywide view... ${i} of ${sourceFeatures.length} locations processed.`);
+      }
+
+      const [lon, lat] = feature.geometry.coordinates;
+
+      try {
+        const fc = await getIsochrone(lon, lat, state.mode, state.time);
+
+        if (fc.features && fc.features[0]) {
+          isoFeatures.push(fc.features[0]);
+        }
+      } catch (e) {
+        console.warn('Skipped failed isochrone:', e);
+      }
+    }
+
+    if (!isoFeatures.length) {
+      updateResults('No isochrones could be generated.');
+      return;
+    }
+
+    const merged = unionFeatures(isoFeatures);
+
+    if (!merged) {
+      updateResults('Could not merge the isochrone surfaces.');
+      return;
+    }
+
+    drawIsoAndDesert(merged);
+
+    const reachable = filterReachablePoints(merged);
+
+    let label = 'Citywide accessibility';
+    if (state.analysis === 'grocery') label = 'All grocery stores';
+    if (state.analysis === 'markets') label = 'All farmers markets';
+    if (state.analysis === 'both') label = 'Combined food access network';
+
+    renderResults(label, 'System-wide accessibility surface', reachable, null);
+  }
+
+  async function refreshAnalysis() {
+    try {
+      if (state.analysis === 'single' && state.selectedFeature) {
+        await runSingleFeatureAnalysis(state.selectedFeature.feature, state.selectedFeature.label);
+      } else if (state.analysis === 'single' && state.addressFeature) {
+        await runAddressAnalysis();
+      } else if (['grocery', 'markets', 'both'].includes(state.analysis)) {
+        await runAllSitesAnalysis();
+      } else {
+        updateResults('Click a grocery store or farmers market, enter an address, or run a citywide accessibility view.');
+      }
+    } catch (err) {
+      console.error(err);
+
+      updateResults(`
+        <strong>Analysis failed</strong><br>
+        ${err.message}
+        <div class="footer-note">Check the selected mode, the Mapbox token, or the source GeoJSON files if the problem continues.</div>
+      `);
+    }
+  }
+
+  async function loadCensusTracts() {
+    try {
+      const tractUrl = 'https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Tracts_Blocks/MapServer/0/query?where=STATE%3D%2742%27%20AND%20COUNTY%3D%27101%27&outFields=GEOID,NAME&outSR=4326&f=geojson';
+      const acsUrl = `https://api.census.gov/data/${CENSUS_YEAR}/acs/acs5?get=NAME,B01003_001E,B17001_002E&for=tract:*&in=state:42%20county:101`;
+
+      const [tracts, acsRows] = await Promise.all([
+        fetch(tractUrl).then(r => r.json()),
+        fetch(acsUrl).then(r => r.json())
+      ]);
+
+      const headers = acsRows[0];
+      const data = new Map();
+
+      acsRows.slice(1).forEach(row => {
+        const record = Object.fromEntries(headers.map((h, i) => [h, row[i]]));
+        const geoid = `${record.state}${record.county}${record.tract}`;
+
+        data.set(geoid, {
+          population: Number(record.B01003_001E || 0),
+          poverty: Number(record.B17001_002E || 0)
+        });
+      });
+
+      tracts.features.forEach(feature => {
+        const geoid =
+          feature.properties.GEOID ||
+          feature.properties.GEOID20 ||
+          feature.properties.GEOIDFQ?.slice(-11);
+
+        const values = data.get(geoid) || { population: 0, poverty: 0 };
+
+        feature.properties.population = values.population;
+        feature.properties.poverty = values.poverty;
+        feature.properties.poverty_rate = values.population ? values.poverty / values.population : 0;
+      });
+
+      state.tractData = tracts;
+      // Note: census tracts are used for population / poverty estimates and
+      // recommendation scoring, but are no longer rendered as a map layer.
+
+      // Census ready — kick off recommendations if not already computed
+      if (!recs.items.length && !recs.computing) {
+        computeRecommendations();
+      }
+    } catch (err) {
+      console.warn('Census tract layer could not be loaded.', err);
+    }
+  }
+
+  // Census tract layer rendering removed — tract data is still used for
+  // population/poverty estimates and recommendation scoring, but not drawn.
+
+  function downloadFile(filename, content, type) {
+    const blob = new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+
+    a.href = url;
+    a.download = filename;
+
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    URL.revokeObjectURL(url);
+  }
+
+  function exportReachableCSV() {
+    if (!state.latestReachable) {
+      updateResults('Run an analysis before exporting results.');
+      return;
+    }
+
+    const rows = [[
+      'type',
+      'name',
+      'address',
+      'city',
+      'zip',
+      'longitude',
+      'latitude',
+      'reachable',
+      'analysis',
+      'mode',
+      'minutes'
+    ]];
+
+    const addRows = (features, type, ids) => {
+      features.forEach(feature => {
+        const props = feature.properties || {};
+
+        rows.push([
+          type,
+          getPointName(props),
+          getPointAddress(props),
+          props.City || props.city || 'Philadelphia',
+          props.Zip5 || props.zip || '',
+          feature.geometry.coordinates[0],
+          feature.geometry.coordinates[1],
+          ids.includes(feature.id),
+          state.currentResultTitle || '',
+          state.mode,
+          state.time
+        ]);
+      });
+    };
+
+    addRows(state.groceryData.features, 'grocery', state.latestReachable.groceryReachableIds);
+    addRows(state.marketData.features, 'market', state.latestReachable.marketReachableIds);
+
+    const csv = rows
+      .map(row => row.map(value => `"${String(value).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+
+    downloadFile(`philly-food-access-${state.mode}-${state.time}min.csv`, csv, 'text/csv');
+  }
+
+  function exportCurrentGeoJSON() {
+    if (!state.latestIsoFeature) {
+      updateResults('Run an analysis before exporting GeoJSON.');
+      return;
+    }
+
+    const features = [
+      {
+        ...state.latestIsoFeature,
+        properties: {
+          ...(state.latestIsoFeature.properties || {}),
+          layer: 'selected_travel_time_access',
+          mode: state.mode,
+          minutes: state.time
+        }
+      }
+    ];
+
+    if (state.latestDesertFeature) {
+      features.push({
+        ...state.latestDesertFeature,
+        properties: {
+          ...(state.latestDesertFeature.properties || {}),
+          layer: 'outside_selected_travel_time_access',
+          mode: state.mode,
+          minutes: state.time
+        }
+      });
+    }
+
+    downloadFile(
+      `philly-food-access-${state.mode}-${state.time}min.geojson`,
+      JSON.stringify({ type: 'FeatureCollection', features }, null, 2),
+      'application/geo+json'
+    );
+  }
+
+  document.querySelectorAll('#mode-group .btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      state.mode = btn.dataset.mode;
+      setActiveButton('mode-group', 'mode', state.mode);
+      await refreshAnalysis();
+    });
+  });
+
+  document.querySelectorAll('#time-group .btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      state.time = Number(btn.dataset.time);
+      setActiveButton('time-group', 'time', state.time);
+      await refreshAnalysis();
+    });
+  });
+
+  document.querySelectorAll('#analysis-group .btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      state.analysis = btn.dataset.analysis;
+      setActiveButton('analysis-group', 'analysis', state.analysis);
+      await refreshAnalysis();
+    });
+  });
+
+  async function dropPinAndAnalyze(lon, lat) {
+    if (state.cityBoundary) {
+      const inside = (() => {
+        try {
+          return turf.booleanPointInPolygon(turf.point([lon, lat]), state.cityBoundary);
+        } catch (e) { return true; }
+      })();
+      if (!inside) {
+        updateResults(`
+          <strong>That spot is outside Philadelphia</strong><br>
+          Click inside the city boundary to drop a pin.
+        `);
+        return;
+      }
+    }
+
+    state.addressFeature = {
+      center: [lon, lat],
+      place_name: `Dropped pin at ${lat.toFixed(4)}, ${lon.toFixed(4)}`
+    };
+    state.selectedFeature = null;
+    state.analysis = 'single';
+
+    setActiveButton('analysis-group', 'analysis', 'single');
+
+    if (state.addressMarker) state.addressMarker.remove();
+
+    state.addressMarker = new mapboxgl.Marker({ color: '#0a6e84' })
+      .setLngLat([lon, lat])
+      .setPopup(new mapboxgl.Popup().setHTML(`
+        <div class="popup-title">Dropped pin</div>
+        <div class="popup-address">${lat.toFixed(5)}, ${lon.toFixed(5)}</div>
+        <div class="popup-meta">Reference location for accessibility analysis</div>
+      `))
+      .addTo(map);
+
+    const clearPinBtn = document.getElementById('clear-pin');
+    if (clearPinBtn) clearPinBtn.disabled = false;
+    const pinHint = document.getElementById('pin-hint');
+    if (pinHint) {
+      pinHint.classList.add('armed');
+      pinHint.textContent = `Pin set at ${lat.toFixed(4)}, ${lon.toFixed(4)}. Click somewhere else to move it.`;
+    }
+
+    try {
+      updateResults('Calculating reachable area from pin...');
+      await runAddressAnalysis();
+    } catch (err) {
+      console.error(err);
+      updateResults(`
+        <strong>Analysis failed</strong><br>
+        ${err.message}
+      `);
+    }
+  }
+
+  function resetPin() {
+    if (state.addressMarker) {
+      state.addressMarker.remove();
+      state.addressMarker = null;
+    }
+    state.addressFeature = null;
+    const clearPinBtn = document.getElementById('clear-pin');
+    if (clearPinBtn) clearPinBtn.disabled = true;
+    const pinHint = document.getElementById('pin-hint');
+    if (pinHint) {
+      pinHint.classList.remove('armed');
+      pinHint.textContent = "Tap any spot on the map to set a reference point. We'll calculate what is reachable from there.";
+    }
+  }
+
+  document.getElementById('clear-pin').addEventListener('click', () => {
+    resetPin();
+    clearAnalysisLayers();
+    if (map.getLayer('grocery-highlight')) {
+      map.setFilter('grocery-highlight', ['in', ['id'], ['literal', []]]);
+    }
+    if (map.getLayer('market-highlight')) {
+      map.setFilter('market-highlight', ['in', ['id'], ['literal', []]]);
+    }
+    updateResults('Click anywhere on the map to drop a pin, click a store or market, or run a citywide accessibility view.');
+  });
+
+  document.getElementById('clear-map').addEventListener('click', () => {
+    state.selectedFeature = null;
+    resetPin();
+
+    // Deselect any active recommendation but keep the layer visible
+    if (recs.activeIndex !== -1) {
+      recs.activeIndex = -1;
+      updateRecsLayerData();
+      renderRecsList();
+    }
+
+    clearAnalysisLayers();
+
+    if (map.getLayer('grocery-highlight')) {
+      map.setFilter('grocery-highlight', ['in', ['id'], ['literal', []]]);
+    }
+
+    if (map.getLayer('market-highlight')) {
+      map.setFilter('market-highlight', ['in', ['id'], ['literal', []]]);
+    }
+
+    updateResults('Click a grocery store or farmers market, enter an address, or run a citywide accessibility view.');
+  });
+
+  document.getElementById('zoom-city').addEventListener('click', () => {
+    zoomToCity();
+  });
+
+  document.getElementById('export-csv').addEventListener('click', exportReachableCSV);
+  document.getElementById('export-geojson').addEventListener('click', exportCurrentGeoJSON);
+
+  document.getElementById('toggle-methods').addEventListener('click', () => {
+    const panel = document.getElementById('methods-panel');
+    const isOpen = panel.classList.toggle('open');
+
+    document.getElementById('toggle-methods').textContent = isOpen ? 'Hide methods' : 'Show methods';
+  });
+
+  document.getElementById('toggle-groceries').addEventListener('change', event => {
+    setLayerVisibility(['grocery-base', 'grocery-highlight'], event.target.checked);
+  });
+
+  document.getElementById('toggle-markets').addEventListener('change', event => {
+    setLayerVisibility(['market-base', 'market-highlight'], event.target.checked);
+  });
+
+  document.getElementById('basemap-select').addEventListener('change', event => {
+    map.setStyle(event.target.value);
+    // After style swap, the iso/desert layers are re-added in `style.load`,
+    // and `drawIsoAndDesert` will pick up the new basemap-aware paint.
+  });
+
+  // ===== Recommended grocery store sites =====
+  const recs = {
+    items: [],
+    activeIndex: -1,
+    visible: true,
+    computing: false
+  };
+
+  function recsSetStatus(text) {
+    const el = document.getElementById('recs-status');
+    if (el) el.textContent = text;
+  }
+
+  // Threshold for what counts as "served": within REC_WALK_MIN of any grocery
+  const REC_WALK_MIN = 15;
+
+  // Build merged 15-min walking iso from all groceries, clipped to city limits
+  async function buildGroceryWalkSurface() {
+    const sourceFeatures = state.groceryData.features;
+    const isoFeatures = [];
+    for (let i = 0; i < sourceFeatures.length; i++) {
+      if (i % 8 === 0) recsSetStatus(`Modeling current ${REC_WALK_MIN}-min grocery walkshed&hellip; ${i}/${sourceFeatures.length}`);
+      const [lon, lat] = sourceFeatures[i].geometry.coordinates;
+      try {
+        const fc = await getIsochrone(lon, lat, 'walking', REC_WALK_MIN);
+        if (fc.features && fc.features[0]) isoFeatures.push(fc.features[0]);
+      } catch (e) { /* skip */ }
+    }
+    const merged = unionFeatures(isoFeatures);
+    if (!merged) return null;
+    // Clip to city so we never claim coverage outside Philadelphia
+    return clipToCity(merged) || merged;
+  }
+
+  // Generate hex grid of candidate points covering the city
+  function generateCandidateGrid() {
+    if (!state.cityBoundary) return [];
+    const bbox = turf.bbox(state.cityBoundary);
+    // ~0.45 mile spacing — dense enough to find good spots, fast enough to score
+    const grid = turf.hexGrid(bbox, 0.45, { units: 'miles' });
+    const candidates = [];
+    grid.features.forEach(hex => {
+      const center = turf.centroid(hex);
+      try {
+        if (turf.booleanPointInPolygon(center, state.cityBoundary)) {
+          candidates.push(center);
+        }
+      } catch (e) {}
+    });
+    return candidates;
+  }
+
+  // Pre-compute tract centroid + population list once
+  let tractCentroidCache = null;
+  function getTractCentroidsArray() {
+    if (tractCentroidCache) return tractCentroidCache;
+    if (!state.tractData) return [];
+    const arr = [];
+    state.tractData.features.forEach(f => {
+      const pop = Number(f.properties.population || 0);
+      if (!pop) return;
+      try {
+        const c = turf.centroid(f);
+        const [lon, lat] = c.geometry.coordinates;
+        arr.push({
+          lon, lat,
+          pop,
+          povRate: Number(f.properties.poverty_rate || 0),
+          name: f.properties.NAME || ''
+        });
+      } catch (e) {}
+    });
+    tractCentroidCache = arr;
+    return arr;
+  }
+
+  // Quick haversine distance in miles (faster than turf.distance for thousands of calls)
+  function quickDistMiles(lon1, lat1, lon2, lat2) {
+    const R = 3958.8;
+    const toRad = Math.PI / 180;
+    const dLat = (lat2 - lat1) * toRad;
+    const dLon = (lon2 - lon1) * toRad;
+    const a = Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+  }
+
+  // For a candidate point, estimate population it would newly serve.
+  // Population within a 15-min walk radius (~0.75 mi) AND that tract centroid
+  // is currently outside the existing 15-min grocery walkshed.
+  function scoreCandidate(candidate, currentSurface, tractCentroids, existingPoints) {
+    const [lon, lat] = candidate.geometry.coordinates;
+    // ~0.75 mi corresponds to a brisk 15-min walk
+    const SERVICE_RADIUS_MI = 0.75;
+
+    let popServed = 0;
+    let povServed = 0;
+    let nearestTractName = '';
+    let nearestTractDist = Infinity;
+
+    for (const t of tractCentroids) {
+      const d = quickDistMiles(lon, lat, t.lon, t.lat);
+      if (d > SERVICE_RADIUS_MI) continue;
+      // Only count tracts whose centroid is currently outside the merged grocery walkshed
+      const centroidPt = turf.point([t.lon, t.lat]);
+      let outside = true;
+      try {
+        if (currentSurface && turf.booleanPointInPolygon(centroidPt, currentSurface)) {
+          outside = false;
+        }
+      } catch (e) {}
+      if (!outside) continue;
+      // Weight closer tracts more — linear falloff
+      const weight = 1 - (d / SERVICE_RADIUS_MI) * 0.5;
+      popServed += t.pop * weight;
+      povServed += t.pop * t.povRate * weight;
+      if (d < nearestTractDist) {
+        nearestTractDist = d;
+        nearestTractName = t.name;
+      }
+    }
+
+    if (popServed < 500) return null; // skip irrelevant
+
+    // Distance to nearest existing grocery — bigger gap = stronger case
+    let nearestExistingDist = Infinity;
+    let nearestExistingName = '';
+    for (const p of existingPoints) {
+      const [plon, plat] = p.geometry.coordinates;
+      const d = quickDistMiles(lon, lat, plon, plat);
+      if (d < nearestExistingDist) {
+        nearestExistingDist = d;
+        nearestExistingName = getPointName(p.properties);
+      }
+    }
+
+    // Weighted poverty rate among the population this site would newly serve
+    const povRate = popServed > 0 ? Math.min(1, povServed / popServed) : 0;
+    // Score: people served × poverty multiplier × isolation bonus (further from existing = better)
+    const isolationBonus = Math.min(1.5, 0.8 + nearestExistingDist * 0.6);
+    const score = popServed * (1 + povRate * 0.8) * isolationBonus;
+
+    return {
+      lon, lat,
+      popServed: Math.round(popServed),
+      povRate,
+      nearestExistingDist,
+      nearestExistingName,
+      nearestTractName,
+      score
+    };
+  }
+
+  // Greedy pick top-K with minimum spacing
+  function pickTopWithSpacing(scored, k, minSpacingMiles) {
+    const sorted = [...scored].sort((a, b) => b.score - a.score);
+    const picked = [];
+    for (const cand of sorted) {
+      if (picked.length >= k) break;
+      const tooClose = picked.some(p =>
+        quickDistMiles(cand.lon, cand.lat, p.lon, p.lat) < minSpacingMiles
+      );
+      if (!tooClose) picked.push(cand);
+    }
+    return picked;
+  }
+
+  // Generate human-readable rationale
+  function generateRationale(rec, rank) {
+    const popText = rec.popServed.toLocaleString();
+    const povPct = Math.round(rec.povRate * 100);
+    const distMi = rec.nearestExistingDist.toFixed(1);
+    const lead = rank === 0 ? 'Highest-impact site' :
+      rank === 1 ? 'Second-priority gap' :
+      rank === 2 ? 'Strong third option' :
+      rank === 3 ? 'Underserved corridor' : 'Fifth-priority gap';
+
+    let why = `~${popText} residents currently outside a 15-min walk to any grocery would gain access. `;
+    if (povPct >= 25) {
+      why += `Higher-poverty area (${povPct}% below poverty line) — strong equity case. `;
+    } else if (povPct >= 15) {
+      why += `Moderate poverty rate (${povPct}%). `;
+    }
+    why += `Nearest existing grocery (${rec.nearestExistingName}) is ${distMi} mi away.`;
+    return { lead, why };
+  }
+
+  function ensureRecsLayer() {
+    if (!map.getSource('rec-sites')) {
+      map.addSource('rec-sites', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] }
+      });
+      // Outer halo
+      map.addLayer({
+        id: 'rec-halo',
+        type: 'circle',
+        source: 'rec-sites',
+        paint: {
+          'circle-radius': [
+            'interpolate', ['linear'], ['zoom'],
+            10, 14, 13, 22, 16, 32
+          ],
+          'circle-color': '#d4a017',
+          'circle-opacity': 0.18,
+          'circle-stroke-color': '#d4a017',
+          'circle-stroke-width': 1,
+          'circle-stroke-opacity': 0.45
+        }
+      });
+      // Inner badge
+      map.addLayer({
+        id: 'rec-badge',
+        type: 'circle',
+        source: 'rec-sites',
+        paint: {
+          'circle-radius': [
+            'interpolate', ['linear'], ['zoom'],
+            10, 9, 13, 13, 16, 17
+          ],
+          'circle-color': '#d4a017',
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 2.5,
+          'circle-opacity': 0.98
+        }
+      });
+      // Number labels
+      map.addLayer({
+        id: 'rec-label',
+        type: 'symbol',
+        source: 'rec-sites',
+        layout: {
+          'text-field': ['get', 'rank'],
+          'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
+          'text-size': [
+            'interpolate', ['linear'], ['zoom'],
+            10, 11, 13, 13, 16, 16
+          ],
+          'text-allow-overlap': true,
+          'text-ignore-placement': true
+        },
+        paint: {
+          'text-color': '#ffffff',
+          'text-halo-color': '#8a6810',
+          'text-halo-width': 1
+        }
+      });
+      // Active highlight ring
+      map.addLayer({
+        id: 'rec-active-ring',
+        type: 'circle',
+        source: 'rec-sites',
+        filter: ['==', ['get', 'active'], true],
+        paint: {
+          'circle-radius': [
+            'interpolate', ['linear'], ['zoom'],
+            10, 22, 13, 30, 16, 42
+          ],
+          'circle-color': 'transparent',
+          'circle-stroke-color': '#8a6810',
+          'circle-stroke-width': 2.5,
+          'circle-opacity': 0
+        }
+      });
+
+      // Click on a rec marker → focus it
+      map.on('click', 'rec-badge', (e) => {
+        const f = e.features[0];
+        if (f && f.properties.idx !== undefined) {
+          focusRecItem(Number(f.properties.idx));
+        }
+      });
+      ['rec-badge', 'rec-halo'].forEach(layerId => {
+        map.on('mouseenter', layerId, () => { map.getCanvas().style.cursor = 'pointer'; });
+        map.on('mouseleave', layerId, () => { map.getCanvas().style.cursor = 'crosshair'; });
+      });
+    }
+  }
+
+  function updateRecsLayerData() {
+    if (!map.getSource('rec-sites')) return;
+    const features = recs.items.map((rec, idx) => ({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [rec.lon, rec.lat] },
+      properties: {
+        idx,
+        rank: String(idx + 1),
+        active: idx === recs.activeIndex,
+        popServed: rec.popServed
+      }
+    }));
+    map.getSource('rec-sites').setData({
+      type: 'FeatureCollection',
+      features
+    });
+  }
+
+  function setRecsVisibility(visible) {
+    recs.visible = visible;
+    ['rec-halo', 'rec-badge', 'rec-label', 'rec-active-ring'].forEach(id => {
+      if (map.getLayer(id)) {
+        map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none');
+      }
+    });
+    const btn = document.getElementById('recs-toggle');
+    if (btn) btn.textContent = visible ? 'Hide on map' : 'Show on map';
+  }
+
+  function renderRecsList() {
+    const list = document.getElementById('recs-list');
+    if (!list) return;
+    if (!recs.items.length) {
+      list.innerHTML = '<div class="recs-empty">Awaiting computation&hellip;</div>';
+      return;
+    }
+    list.innerHTML = recs.items.map((rec, idx) => {
+      const { lead, why } = generateRationale(rec, idx);
+      const popText = rec.popServed.toLocaleString();
+      const povPct = Math.round(rec.povRate * 100);
+      return `
+        <button type="button" class="rec-row${idx === recs.activeIndex ? ' active' : ''}" data-idx="${idx}">
+          <div class="rec-row-head">
+            <span class="rec-rank">${idx + 1}</span>
+            <span class="rec-row-title">${lead}</span>
+          </div>
+          <div class="rec-row-stats">
+            <div class="rec-row-stat"><strong>${popText}</strong>residents served</div>
+            <div class="rec-row-stat"><strong>${povPct}%</strong>below poverty</div>
+          </div>
+          <div class="rec-row-why">${why}</div>
+        </button>
+      `;
+    }).join('');
+    list.querySelectorAll('.rec-row').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = Number(btn.dataset.idx);
+        focusRecItem(idx);
+      });
+    });
+  }
+
+  function focusRecItem(idx) {
+    if (idx < 0 || idx >= recs.items.length) return;
+    recs.activeIndex = idx;
+    const rec = recs.items[idx];
+    updateRecsLayerData();
+    renderRecsList();
+    map.flyTo({
+      center: [rec.lon, rec.lat],
+      zoom: Math.max(map.getZoom(), 13.5),
+      duration: 900,
+      essential: true
+    });
+    // Make sure recs are visible if hidden
+    if (!recs.visible) setRecsVisibility(true);
+  }
+
+  async function computeRecommendations() {
+    if (recs.computing) return;
+    if (!state.groceryData || !state.cityBoundary) {
+      recsSetStatus('Waiting for map data&hellip;');
+      return;
+    }
+    if (!state.tractData) {
+      recsSetStatus('Waiting for census data&hellip;');
+      // Try again shortly
+      setTimeout(computeRecommendations, 1500);
+      return;
+    }
+    recs.computing = true;
+    document.getElementById('recs-recompute').disabled = true;
+    recsSetStatus('Modeling current grocery walkshed&hellip;');
+
+    try {
+      const surface = await buildGroceryWalkSurface();
+      recsSetStatus('Scoring candidate sites across Philadelphia&hellip;');
+      // Yield to UI
+      await new Promise(r => setTimeout(r, 30));
+
+      const candidates = generateCandidateGrid();
+      const tractCentroids = getTractCentroidsArray();
+      const existingPoints = state.groceryData.features;
+
+      const scored = [];
+      for (let i = 0; i < candidates.length; i++) {
+        const result = scoreCandidate(candidates[i], surface, tractCentroids, existingPoints);
+        if (result) scored.push(result);
+        if (i % 60 === 0) {
+          recsSetStatus(`Scoring candidate sites&hellip; ${i}/${candidates.length}`);
+          await new Promise(r => setTimeout(r, 0));
+        }
+      }
+
+      // Greedy pick top-5 with 1.0 mi minimum spacing
+      const picked = pickTopWithSpacing(scored, 5, 1.0);
+      recs.items = picked;
+      recs.activeIndex = -1;
+
+      ensureRecsLayer();
+      updateRecsLayerData();
+      renderRecsList();
+
+      if (picked.length) {
+        const totalServed = picked.reduce((s, r) => s + r.popServed, 0);
+        recsSetStatus(`5 sites selected. Together they would bring grocery access to ~${totalServed.toLocaleString()} residents currently outside a 15-min walk of any grocery in Philadelphia.`);
+      } else {
+        recsSetStatus('No high-impact gaps found — every populated area is within a 15-min walk of a grocery.');
+      }
+    } catch (err) {
+      console.error('Recommendation error:', err);
+      recsSetStatus('Could not compute recommendations. Try again in a moment.');
+    } finally {
+      recs.computing = false;
+      document.getElementById('recs-recompute').disabled = false;
+    }
+  }
+
+  document.getElementById('recs-recompute').addEventListener('click', computeRecommendations);
+  document.getElementById('recs-toggle').addEventListener('click', () => {
+    setRecsVisibility(!recs.visible);
+  });
+
+  function addCoreLayers() {
+    if (!state.cityBoundary || !state.groceryData || !state.marketData) return;
+
+    if (!map.getSource('city-boundary')) {
+      map.addSource('city-boundary', {
+        type: 'geojson',
+        data: state.cityBoundary
+      });
+
+      map.addLayer({
+        id: 'city-fill',
+        type: 'fill',
+        source: 'city-boundary',
+        paint: {
+          'fill-color': '#f5efe6',
+          'fill-opacity': 0.20
+        }
+      });
+
+      map.addLayer({
+        id: 'city-line',
+        type: 'line',
+        source: 'city-boundary',
+        paint: {
+          'line-color': '#5a534c',
+          'line-width': 2.2,
+          'line-opacity': 0.85
+        }
+      });
+    }
+
+    if (!map.getSource('grocery-stores')) {
+      map.addSource('grocery-stores', {
+        type: 'geojson',
+        data: state.groceryData
+      });
+    }
+
+    if (!map.getSource('farmers-markets')) {
+      map.addSource('farmers-markets', {
+        type: 'geojson',
+        data: state.marketData
+      });
+    }
+
+    if (!map.getLayer('grocery-base')) {
+      map.addLayer({
+        id: 'grocery-base',
+        type: 'circle',
+        source: 'grocery-stores',
+        paint: {
+          'circle-radius': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            9, 4,
+            12, 6,
+            15, 9
+          ],
+          'circle-color': '#1f6fb2',
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 1.2,
+          'circle-opacity': 0.92
+        }
+      });
+    }
+
+    if (!map.getLayer('market-base')) {
+      map.addLayer({
+        id: 'market-base',
+        type: 'circle',
+        source: 'farmers-markets',
+        paint: {
+          'circle-radius': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            9, 4,
+            12, 6,
+            15, 9
+          ],
+          'circle-color': '#1f8f5a',
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 1.2,
+          'circle-opacity': 0.92
+        }
+      });
+    }
+
+    if (!map.getLayer('grocery-highlight')) {
+      map.addLayer({
+        id: 'grocery-highlight',
+        type: 'circle',
+        source: 'grocery-stores',
+        filter: ['in', ['id'], ['literal', []]],
+        paint: {
+          'circle-radius': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            9, 7,
+            12, 10,
+            15, 14
+          ],
+          'circle-color': '#144d80',
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 2,
+          'circle-opacity': 0.95
+        }
+      });
+    }
+
+    if (!map.getLayer('market-highlight')) {
+      map.addLayer({
+        id: 'market-highlight',
+        type: 'circle',
+        source: 'farmers-markets',
+        filter: ['in', ['id'], ['literal', []]],
+        paint: {
+          'circle-radius': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            9, 7,
+            12, 10,
+            15, 14
+          ],
+          'circle-color': '#145c3a',
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 2,
+          'circle-opacity': 0.95
+        }
+      });
+    }
+
+    setLayerVisibility(['grocery-base', 'grocery-highlight'], document.getElementById('toggle-groceries')?.checked ?? true);
+    setLayerVisibility(['market-base', 'market-highlight'], document.getElementById('toggle-markets')?.checked ?? true);
+  }
+
+  function bindMapInteractions() {
+    map.on('click', 'grocery-base', async (e) => {
+      const feature = e.features[0];
+
+      state.selectedFeature = {
+        feature,
+        label: getPointName(feature.properties)
+      };
+
+      state.addressFeature = null;
+      state.analysis = 'single';
+
+      setActiveButton('analysis-group', 'analysis', 'single');
+
+      new mapboxgl.Popup({ offset: 12 })
+        .setLngLat(feature.geometry.coordinates)
+        .setHTML(popupHTML(feature.properties, 'Grocery store', '#1f6fb2'))
+        .addTo(map);
+
+      await refreshAnalysis();
+    });
+
+    map.on('click', 'market-base', async (e) => {
+      const feature = e.features[0];
+
+      state.selectedFeature = {
+        feature,
+        label: getPointName(feature.properties)
+      };
+
+      state.addressFeature = null;
+      state.analysis = 'single';
+
+      setActiveButton('analysis-group', 'analysis', 'single');
+
+      new mapboxgl.Popup({ offset: 12 })
+        .setLngLat(feature.geometry.coordinates)
+        .setHTML(popupHTML(feature.properties, 'Farmers market', '#1f8f5a'))
+        .addTo(map);
+
+      await refreshAnalysis();
+    });
+
+    ['grocery-base', 'market-base'].forEach(layerId => {
+      map.on('mouseenter', layerId, () => {
+        map.getCanvas().style.cursor = 'pointer';
+      });
+
+      map.on('mouseleave', layerId, () => {
+        map.getCanvas().style.cursor = '';
+      });
+    });
+
+    // Empty-space click: drop a pin and analyze
+    map.on('click', async (e) => {
+      const hit = map.queryRenderedFeatures(e.point, {
+        layers: ['grocery-base', 'market-base'].filter(id => map.getLayer(id))
+      });
+      if (hit.length) return; // a store/market handled it
+      await dropPinAndAnalyze(e.lngLat.lng, e.lngLat.lat);
+    });
+
+    map.getCanvas().style.cursor = 'crosshair';
+  }
+
+  map.on('style.load', () => {
+    addCoreLayers();
+
+    if (state.latestIsoFeature) {
+      drawIsoAndDesert(state.latestIsoFeature);
+    }
+
+    if (state.latestReachable && map.getLayer('grocery-highlight') && map.getLayer('market-highlight')) {
+      map.setFilter('grocery-highlight', ['in', ['id'], ['literal', state.latestReachable.groceryReachableIds]]);
+      map.setFilter('market-highlight', ['in', ['id'], ['literal', state.latestReachable.marketReachableIds]]);
+    }
+
+    // Re-add recommendation markers after style change
+    if (recs.items.length) {
+      ensureRecsLayer();
+      updateRecsLayerData();
+      setRecsVisibility(recs.visible);
+    }
+  });
+
+  map.on('load', async () => {
+    const [cityRaw, groceryRaw, marketRaw] = await Promise.all([
+      fetch('City_Limits.geojson').then(r => r.json()),
+      fetch('grocery_stores.geojson').then(r => r.json()),
+      fetch('Farmers_Markets.geojson').then(r => r.json())
+    ]);
+
+    state.cityBoundary = cityRaw.features.length === 1 ? cityRaw.features[0] : cityRaw.features[0];
+    state.groceryData = groceryRaw;
+    state.supplementalCount = mergeSupplementalGroceries(state.groceryData);
+    state.groceryData = assignFeatureIds(state.groceryData);
+    state.marketData = assignFeatureIds(marketRaw);
+
+    updateTopCounts();
+    addCoreLayers();
+    bindMapInteractions();
+    loadCensusTracts();
+
+    fitToGeoJSON({
+      type: 'FeatureCollection',
+      features: [state.cityBoundary]
+    });
+
+    updateResults(`
+      <strong>Map ready</strong><br>
+      Click anywhere on the map to drop a pin, click a grocery store or farmers market, or run a citywide accessibility view.
+      <div class="results-grid">
+        <div class="results-kpi">
+          <div class="results-kpi-label">Grocery stores loaded</div>
+          <div class="results-kpi-value">${state.groceryData.features.length}</div>
+        </div>
+        <div class="results-kpi">
+          <div class="results-kpi-label">Markets loaded</div>
+          <div class="results-kpi-value">${state.marketData.features.length}</div>
+        </div>
+      </div>
+      <div class="footer-note">Added ${state.supplementalCount} verified supplemental grocery locations. Pin drops are restricted to Philadelphia city limits.</div>
+    `);
+  });
+</script>
+</body>
+</html>
